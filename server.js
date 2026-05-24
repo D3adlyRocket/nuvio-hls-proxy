@@ -3,15 +3,19 @@ const fetch = require("node-fetch");
 
 const app = express();
 
+function absoluteUrl(base, relative) {
+  return new URL(relative, base).href;
+}
+
 app.get("/proxy", async (req, res) => {
   try {
-    const url = req.query.url;
+    const target = req.query.url;
 
-    if (!url) {
+    if (!target) {
       return res.status(400).send("Missing URL");
     }
 
-    const response = await fetch(url, {
+    const response = await fetch(target, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -21,11 +25,50 @@ app.get("/proxy", async (req, res) => {
     });
 
     const contentType =
-      response.headers.get("content-type") ||
-      "application/vnd.apple.mpegurl";
+      response.headers.get("content-type") || "";
 
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    // HLS PLAYLIST
+    if (
+      contentType.includes("mpegurl") ||
+      target.includes(".m3u8")
+    ) {
+      let text = await response.text();
+
+      const lines = text.split("\n");
+
+      const rewritten = lines.map((line) => {
+        line = line.trim();
+
+        if (
+          line &&
+          !line.startsWith("#")
+        ) {
+          const abs = absoluteUrl(target, line);
+
+          return `/proxy?url=${encodeURIComponent(abs)}`;
+        }
+
+        return line;
+      });
+
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.apple.mpegurl"
+      );
+
+      res.setHeader(
+        "Access-Control-Allow-Origin",
+        "*"
+      );
+
+      return res.send(rewritten.join("\n"));
+    }
+
+    // VIDEO SEGMENTS (.ts/.mp4/etc)
+    res.setHeader(
+      "Access-Control-Allow-Origin",
+      "*"
+    );
 
     response.body.pipe(res);
 
